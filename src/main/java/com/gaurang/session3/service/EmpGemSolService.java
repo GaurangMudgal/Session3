@@ -32,6 +32,9 @@ public class EmpGemSolService {
 
     Logger logger = LoggerFactory.getLogger(EmpGemSolService.class);
 
+    final AtomicReference<List<PermanentEmp>> permEmps = new AtomicReference<>();
+    final AtomicReference<List<TraineeEmp>> traineeEmps = new AtomicReference<>();
+
     @PostConstruct
     private void init() {
         // Just to add huge dummy data in DB
@@ -39,48 +42,55 @@ public class EmpGemSolService {
         List<PermanentEmp> permanentEmps = new ArrayList<>();
         List<TraineeEmp> traineeEmps = new ArrayList<>();
         for (long i = 1; i <= 1000; i++) {
-            permanentEmps.add(new PermanentEmp(i, "permEmp"+i, "XYZ"+i%3));
-            traineeEmps.add(new TraineeEmp(i, "traineeEmp"+i, "XYZ"+i%3));
+            PermanentEmp permanentEmp = new PermanentEmp();
+            permanentEmp.setEmpName("permEmp"+i);
+            permanentEmp.setEmpDept("XYZ"+((i%4)+1));
+            permanentEmps.add(permanentEmp);
+
+            TraineeEmp traineeEmp = new TraineeEmp();
+            traineeEmp.setEmpName("traineeEmp"+i);
+            traineeEmp.setEmpDept("XYZ"+((i%4)+1));
+            traineeEmps.add(traineeEmp);
         }
         permEmpGemSol.saveAll(permanentEmps);
         traineeGemSol.saveAll(traineeEmps);
     }
 
-    @Async
-    private CompletableFuture<List<PermanentEmp>> getPermanentEmployees() {
-        List<PermanentEmp> permanentEmps = permEmpGemSol.findAll();
-        return CompletableFuture.completedFuture(permanentEmps);
+    private CompletableFuture<Void> getPermEmployees() {
+        return CompletableFuture.runAsync(() -> {
+            logger.info("Current Thread: {}", Thread.currentThread().getName());
+            permEmps.set(permEmpGemSol.findAll());
+            logger.info("Leaving Thread: {}", Thread.currentThread().getName());
+        }).toCompletableFuture();
     }
 
-    @Async
-    private CompletableFuture<List<TraineeEmp>> getTraineeEmployees() {
-        List<TraineeEmp> traineeEmps = traineeGemSol.findAll();
-        return CompletableFuture.completedFuture(traineeEmps);
+    private CompletableFuture<Void> getTraineeEmployees() {
+        return CompletableFuture.runAsync(() -> {
+            logger.info("Current Thread: {}", Thread.currentThread().getName());
+            traineeEmps.set(traineeGemSol.findAll());
+            logger.info("Leaving Thread: {}", Thread.currentThread().getName());
+        }).toCompletableFuture();
     }
 
     public void saveAllEmployees() {
-
-        final AtomicReference<List<PermanentEmp>> permEmps = new AtomicReference<>();
-        final AtomicReference<List<TraineeEmp>> traineeEmps = new AtomicReference<>();
         List<Employee> employees = new ArrayList<>();
 
         try {
-            CompletableFuture.runAsync(() -> {
-                logger.info("Current Thread: {}", Thread.currentThread().getName());
-                permEmps.set(permEmpGemSol.findAll());
-            }).thenRunAsync(() -> {
-                logger.info("Current Thread: {}", Thread.currentThread().getName());
-                traineeEmps.set(traineeGemSol.findAll());
-            }).thenRunAsync(() -> {
+            CompletableFuture.allOf(getPermEmployees(), getTraineeEmployees()).thenRun(() -> {
                 permEmps.get().forEach(emp -> {
-                    Employee e = new Employee(emp.getEmpId(), emp.getEmpName(), emp.getEmpDept());
+                    Employee e = new Employee();
+                    e.setEmpName(emp.getEmpName());
+                    e.setEmpDept(emp.getEmpDept());
                     employees.add(e);
                 });
                 traineeEmps.get().forEach(emp -> {
-                    Employee e = new Employee(emp.getEmpId(), emp.getEmpName(), emp.getEmpDept());
+                    Employee e = new Employee();
+                    e.setEmpName(emp.getEmpName());
+                    e.setEmpDept(emp.getEmpDept());
                     employees.add(e);
                 });
                 empGemSol.saveAll(employees);
+            }).thenRun(() -> {
                 logger.info("Saved all employees into DB!");
             });
         } catch (Exception e) {
